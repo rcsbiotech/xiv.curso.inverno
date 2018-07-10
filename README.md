@@ -1,5 +1,6 @@
 # xiv.curso.inverno
 Scripts e tutoriais do XIV curso de inverno de genética.
 
-Para acessar o RStudio, basta acessar:
-200.145.102.86:8787
+Para acessar o curso, acesse a Wiki do mesmo no link abaixo, ou nas abas acima.
+
+Link: https://github.com/rcsbiotech/xiv.curso.inverno/wiki
