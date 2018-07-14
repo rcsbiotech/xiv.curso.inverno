@@ -26,7 +26,7 @@ Em nosso caso, analisaremos as UTOs (unidades taxonômicas operacionais) baseadas
 
 Assim, vamos verificar a estrutura dos dados:
 
-```{r ViewData01}
+```{r ViewData01, message=FALSE, warning=FALSE}
 #Visualizar as primeiras 10 entradas do conjunto de dados
 head(hmp_otus, 10)
 
@@ -38,7 +38,7 @@ head(hmp_samples)
 
 Para analisar a informação taxonômica contida na matriz, vamos utilizar a função `parse_taxa_data()` para criação de um objeto, que aqui será uma classe totalmente nova, denominada como `taxmap`, que é criada a partir de uma tabela, lista ou vetor que contém os nomes de táxons que representam classificações taxonômicas:
 
-```{r ObjectCreation}
+```{r ObjectCreation, message=FALSE, warning=FALSE}
 
 # Criação de um objeto com os dados de taxonomia já formatados
 # para entrada no pacote MetadecodeR
@@ -78,7 +78,7 @@ HMPTaxa$data$tax_data <- zero_low_counts(HMPTaxa, "tax_data", min_count = 5)
 
 Vamos verificar quantas OTUs não apresentam evidências suficientes, "reais" (que apresentaram 5 ou menos leituras), para isso vamos aplicar a função `rowSums()`, básica do R:
 
-```{r CountBadTaxons}
+```{r CountBadTaxons, message=FALSE, warning=FALSE}
 # Obtem os táxons que foram zerados
 no_reads <- rowSums(HMPTaxa$data$tax_data[,hmp_samples$sample_id]) == 0 
 
@@ -137,76 +137,127 @@ HMPTaxa$data$tax_abund <- calc_taxon_abund(HMPTaxa, "tax_data",
 head(HMPTaxa$data$tax_abund)
 ```
 
-Também podemos calcular o número de amostras que possuem reads para cada táxon, por meio da função `calc_n_samples()`.
+Também podemos calcular o número de amostras que possuem leituras para cada táxon, por meio da função `calc_n_samples()`.
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
 
-obj$data$tax_occ <- calc_n_samples(obj, "tax_abund", groups = hmp_samples$body_site)
+# Contagem de quantas amostras apresentam dados de taxonomia
+HMPTaxa$data$tax_occ <- calc_n_samples(HMPTaxa, "tax_abund", groups = hmp_samples$body_site)
 
-```
+# Visualização dos táxons por ambiente do corpo:
+head(HMPTaxa$data$tax_occ,20)
 
-Notem a adição de mais uma tabela contendo a contagem de reads para cada táxon por área do corpo
-
-```{r message=FALSE, paged.print=FALSE}
-print(obj)
 ```
 
 ## Plotando os dados taxonômicos
 
-Com as informações que obtemos por táxon, podemos plotar as informações usando árvores de calor.
+Com as informações que obtemos por táxon, podemos plotar as informações usando árvores de calor, com a função `heat_tree()`, que exibe a distribuição dos valores associados a uma classificação ou hierarquia taxonômica.
 
-O código abaixo apresenta o número de amostras de "Nariz" que possuem reads para cada táxon. Ele também representa o número de OTUs atribuídas a cada táxon no conjunto de dados geral.
+Vamos verificar por ambientes:
 
-```{r message=FALSE, warning=FALSE, paged.print=FALSE}
-heat_tree(obj, 
+```{r message=FALSE, warning=FALSE, fig.show='hide'}
+
+## Exibição do heatmap para o Nariz:
+heat_tree(HMPTaxa, 
+          # Diversos layouts podem ser usados, entre eles:
+          # "automatic"     - o programa decide baseado no nº de amostras;
+          # "mds"           - promove escalonamento dimensional;
+          # "kamada-kawai"  - agrupa sem sobreposição
+          layout = "automatic",
           node_label = taxon_names,
           node_size = n_obs,
           node_color = Nose, 
-          node_size_axis_label = "OTU count",
-          node_color_axis_label = "Samples with reads")
+          node_size_axis_label = "Contagem de UTOs",
+          node_color_axis_label = "Amostras com leituras")
 ```
+
+![nose_samples](https://puu.sh/AWmni.png)
+
+```{r message=FALSE, warning=FALSE, fig.show='hide'}
+
+## Exibição do heatmap para as Fezes:
+heat_tree(HMPTaxa, 
+          layout = "kamada-kawai",
+          node_label = taxon_names,
+          node_size = n_obs,
+          node_color = Stool, 
+          node_size_axis_label = "Contagem de UTOs",
+          node_color_axis_label = "Amostras com leituras")
+```
+
+![stool_samples](https://puu.sh/AWmFU.png)
 
 ## Comparando dois tratamentos/grupos
 
-Para comparar grupos de amostras, vamos utilizar a função `compare_groups()`. Neste caso vamos comparar, quais táxons diferem entre entre homens e mulheres.
+Para comparar grupos de amostras, vamos utilizar a função `compare_groups()`, que aplica uma função para comparar os dados de abundância. Neste caso vamos comparar quais táxons diferem entre entre homens e mulheres nos diferentes ambientes.
 
-```{r message=FALSE, warning=FALSE}
-obj$data$diff_table <- compare_groups(obj, dataset = "tax_abund",
-                                      cols = hmp_samples$sample_id,
-                                      groups = hmp_samples$sex)
-print(obj$data$diff_table)
+```{r message=FALSE, warning=FALSE, fig.show='hide'}
+
+# Comparando a abundância por ambientes.
+HMPTaxa$data$diff_table <- compare_groups(HMPTaxa, 
+                                          dataset = "tax_abund",
+                                          cols = hmp_samples$sample_id,
+                                          # Aqui, declaramos o grupo para as
+                                          # comparações: o sexo.
+                                          groups = hmp_samples$sex)
+
+# Vejamos a tabela gerada
+head(HMPTaxa$data$diff_table)
+
+# Vamos comparar os gráficos também com heat_tree:
+heat_tree(HMPTaxa, 
+          layout = "davidson-harel",
+          node_label = taxon_names,
+          node_size = n_obs,
+          node_color = log2_median_ratio, 
+          node_color_interval = c(-2, 2),
+          edge_color_interval = c(-2, 2),
+          node_color_range = c("cyan", "gray", "tan"),
+          node_size_axis_label = "Contagem de UTOs",
+          node_color_axis_label = "Log2Ratio")
+
 ```
 
-Neste caso, os táxons coloridos em bronze são mais abundantes nas mulheres e os de cor ciano são mais abundantes nos homens. Porém, não levamos em conta a significância estatística ao mostrar isso. Para verificar a significância estatística, precisamos corrigir as múltiplas comparações, por meio da função ```p.adjust()```.
+![not_normal](D:\RStudio\4_mi_metagenomics\03.jpg)
 
-```{r}
-obj$data$diff_table$wilcox_p_value <- p.adjust(obj$data$diff_table$wilcox_p_value,
+Neste caso, os táxons coloridos em bronze são mais abundantes nas mulheres e os de cor ciano são mais abundantes nos homens. Porém, não levamos em conta a significância estatística ao mostrar isso. Para verificar a significância estatística, precisamos corrigir as múltiplas comparações, por meio da função `p.adjust()`, que retorna os p-valores ajustados.
+
+```{r WilcoxCorrection}
+# Correção de Wilcox
+HMPTaxa$data$diff_table$wilcox_p_value <- p.adjust(HMPTaxa$data$diff_table$wilcox_p_value,
                                                method = "fdr")
 ```
 
 Para verificar a distribuição dos p-valores, podemos gerar um histograma utilizando a função ```hist``` com os resultados de teste de wilcox. A partir deste resultado, podemos ver que nenhuma das amostras apresentam diferença significativa para a comparação entre sexo.
 
-
-```{r}
-hist(obj$data$diff_table$wilcox_p_value) 
+```{r HistogramSignificant, fig.show='hide'}
+# Visualização dos valores de Wilcox
+hist(HMPTaxa$data$diff_table$wilcox_p_value,
+     xlab="p-valores",
+     ylab="Frequência",
+     main="Histograma: p-valores (Wilcox), e correção FDR (falsos positivos)") 
 ```
+
+![histogram](https://puu.sh/AWnm0.png)
 
 ## Comparando qualquer número de tratamentos/grupos
 
-Também podemos fazer comparações com vários grupos. Inicialmente precisamos comparar os grupos a partir da função ```compare_groups()```, visto anteriormente para comparar a abundância de táxons entre homens e mulheres. Agora, vamos realizar a comparação de táxons entre regiões do corpo.
+Também podemos fazer comparações com vários grupos. Inicialmente precisamos comparar os grupos a partir da função `compare_groups()`, visto anteriormente para comparar a abundância de táxons entre homens e mulheres. Agora, vamos realizar a comparação de táxons entre regiões do corpo.
 
 ```{r message=FALSE, warning=FALSE}
-obj$data$diff_table <- compare_groups(obj, dataset = "tax_abund",
+
+# Criação da tabela de diferença entre grupos para os diferentes ambientes do corpo:
+HMPTaxa$data$diff_table <- compare_groups(HMPTaxa, dataset = "tax_abund",
                                       cols = hmp_samples$sample_id,
                                       groups = hmp_samples$body_site)
 #visualizar comparação
-print(obj$data$diff_table)
+head(HMPTaxa$data$diff_table, 30)
 ```
 
-Para plotar os dados da comparação de abundância de táxons referentes à várias regiões do corpo, precisamos aplicar a função ```heat_tree_matrix()```, que irá apresentar os resultados de comparação ao pares.
+Por fim, para exibir os dados da comparação de abundância de táxons referentes à várias regiões do corpo, precisamos aplicar a função ```heat_tree_matrix()```, que irá apresentar os resultados de comparação ao pares.
 
-```{r message=FALSE, warning=FALSE}
-heat_tree_matrix(obj,
+```{r message=FALSE, warning=FALSE, fig.show='hide'}
+heat_tree_matrix(HMPTaxa,
                  dataset = "diff_table",
                  node_size = n_obs,
                  node_label = taxon_names,
@@ -215,6 +266,12 @@ heat_tree_matrix(obj,
                  node_color_trans = "linear",
                  node_color_interval = c(-3, 3),
                  edge_color_interval = c(-3, 3),
-                 node_size_axis_label = "Number of OTUs",
-                 node_color_axis_label = "Log2 ratio median proportions")
+                 node_size_axis_label = "Número de UTOs",
+                 node_color_axis_label = "Log2Ratio")
 ```
+
+Ao final, teremos os significativos:
+![significant_enviros](https://puu.sh/AWnAW.jpg)
+
+E o índice de comparações:
+![index](https://puu.sh/AWnAW.jpg)
