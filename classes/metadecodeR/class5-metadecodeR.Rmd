@@ -1,0 +1,220 @@
+---
+title: "Explorando dados de metataxonômica"
+output: github_document
+---
+
+# MetacodeR: Pacote do R para visualização e manipulação de dados de diversidade taxonômica de comunidades
+
+O Metacoder é um pacote do R que foi criado para analisar, manipular e representar graficamente dados hierárquicos de comunidades, este pacote inclui uma função dinâmica e flexível para analisar a maioria dos formatos baseados em texto que contêm classificações taxonômicas, nomes de táxons, identificadores de táxons ou identificadores de sequência. 
+
+O pacote cria um subconjunto das amostras e ordena esses dados, utilizando um conjunto de funções intuitivas que levam em conta a natureza hierárquica das informações em análise.
+
+Este guia foi baseado na [página de código original do autor](https://github.com/grunwaldlab/metacoder), e está licenciado na [MIT license](https://opensource.org/licenses/MIT).
+
+Para iniciar, vamos carregar o pacote necessário, previamente instalado:
+
+```{r Carregar pacote, message=FALSE, warning=FALSE}
+# Carregar o metacoder
+library(metacoder)
+```
+
+### Subconjunto de dados do Projeto Microbioma Humano
+
+O conjunto de dados que será explorado aqui é baseado no [projeto microbioma humano](https://hmpdacc.org/), que em sua primeira etapa investigou os diferentes microbiomas presentes no corpo humano, tanto em indivíduos saudáveis, como enfermos. 
+
+Em nosso caso, analisaremos as UTOs (unidades taxonômicas operacionais) baseadas em 50 amostras, de 5 microbiomas: a saliva humana, a garganta, fezes, a fossa antecubital direita, e o anterior das narinas, sendo para cada ambiente, 5 amostras masculinas e 5 femininas. Para saber mais sobre os dados, basta chamar no R: `?hmp_otus`.
+
+Assim, vamos verificar a estrutura dos dados:
+
+```{r ViewData01}
+#Visualizar as primeiras 10 entradas do conjunto de dados
+head(hmp_otus, 10)
+
+# Vamos ver, também, como as amostras estão armazenadas
+head(hmp_samples)
+```
+
+## Preparação de dados e construção de um mapa de táxons 
+
+Para analisar a informação taxonômica contida na matriz, vamos utilizar a função `parse_taxa_data()` para criação de um objeto, que aqui será uma classe totalmente nova, denominada como `taxmap`, que é criada a partir de uma tabela, lista ou vetor que contém os nomes de táxons que representam classificações taxonômicas:
+
+```{r ObjectCreation}
+
+# Criação de um objeto com os dados de taxonomia já formatados
+# para entrada no pacote MetadecodeR
+
+HMPTaxa <- parse_tax_data(hmp_otus, 
+                      class_cols = "lineage", 
+                      class_sep = ";",
+                      class_key = c(tax_rank = "info", 
+                                    tax_name = "taxon_name"),
+                      class_regex = "^(.+)__(.+)$")
+
+# Assim, vejamos o objeto criado:
+# ps: Taxa é o plural de táxon!
+# Vamos ver a associação entre ID e taxon:
+head(HMPTaxa$data$tax_data)
+
+# E assim, os primeiros 25 IDs do objeto gerado:
+head(HMPTaxa$data$class_data, 25)
+
+```
+
+## Manipulação da matriz de abundância - filtragens e normalizações de UTOs
+
+As sequências de baixa abundância são na maioria das vezes resultado de erros de sequenciamento, especialmente nas tecnologias em que é necessária a fragmentação das sequências. Assim, tipicamente precisamos remover quaisquer contagens/UTOs com menos de um certo número de leituras, geralmente um número arbitrário como 1, 2 ou 5.
+
+Neste sentido, vamos definir todas as contagens com menos de 5 leituras para zero, ou seja, vamos definir um valor de corte para considerar contagens/UTOs reais, e remover todas as outras atribuições taxonômicas que não tenham, no mínimo, 5 evidências (leituras) que serão, assim, descartadas.
+
+Para isso vamos utilizar a função `zero_low_count()` do nosso pacote, que para um dado objeto da classe `taxmap`, remove todas as contagens a partir do valor arbitrário declarado:
+
+```{r ZeroLowCounts, message=FALSE, warning=FALSE}
+
+# Remoção de evidências de baixa abundância
+# A função acessa a coluna "tax_data", e remove as informações com pouca evidência
+HMPTaxa$data$tax_data <- zero_low_counts(HMPTaxa, "tax_data", min_count = 5)
+
+```
+
+Vamos verificar quantas OTUs não apresentam evidências suficientes, "reais" (que apresentaram 5 ou menos leituras), para isso vamos aplicar a função `rowSums()`, básica do R:
+
+```{r CountBadTaxons}
+# Obtem os táxons que foram zerados
+no_reads <- rowSums(HMPTaxa$data$tax_data[,hmp_samples$sample_id]) == 0 
+
+# Soma quantos foram eliminados pela filtragem (espúrios):
+sum(no_reads)
+```
+
+Com base no resultado `no_reads`, das 1000 UTOs originais, 211 não tiveram evidências suficientes baseado em nosso critério de 5 leituras mínimas. Com este procedimento, pode ser que tenhamos eliminado diversas informações biologicamente verdadeiras, mas 0com certeza foram eliminadas grande parte das falsas positivas. 
+
+O autor de um dos programas mais utilizados de alinhamentos e agrupamentos possui um [texto excelente](http://www.drive5.com/usearch/manual7/singletons.html), discutindo sobre a necessidade ou não de eliminar esse tipo de erro.
+
+Então, podemos remover essas 211 OTUs e seus taxa associados utilizando a função `filter_obs()`, que justamente irá filtrar essas evidências tidas como prováveis falsos-positivos:
+
+```{r RemoveFalsePositives}
+
+# Quantos táxons haviam antes da filtragem?
+sum(table(HMPTaxa$data$tax_data$taxon_id))
+
+# Filtrando as observações espúrias:
+HMPTaxa <- filter_obs(HMPTaxa,"tax_data",! no_reads, drop_taxa = TRUE)
+
+# Vejamos, assim, quantos taxons sobraram dos dados restantes:
+sum(table(HMPTaxa$data$tax_data$taxon_id))
+```
+
+## Cálculo de proporções
+
+Vamos calcular as proporções a partir da contagem de observações (OTUs) para cada amostra, utilizando a função `calc_obs_props()`.
+
+Para melhorar comparar os dados, é interessante que eles sejam convertidos para um valor decimal (de 0 a 1), representando em porcentagem sua participação na comunidade, e é justamente isso que a função fará.
+
+```{r message=FALSE, warning=FALSE}
+# Dados brutos da comunidade:
+head(HMPTaxa$data$tax_data)
+
+# Calcular a proporção baseada no valor total
+HMPTaxa$data$tax_data <- calc_obs_props(HMPTaxa, "tax_data")
+
+# E então, vemos novamente como estão armazenados:
+head(HMPTaxa$data$tax_data)
+```
+
+## Obtendo informações por táxon
+
+Atualmente, temos valores para a abundância de cada UTO e não para cada táxon. Para obter informações sobre os táxons, vamos utilizar a função ```calc_taxon_abund()``` para somar a abundância por táxon. Observem que irá adicionar um tabela com uma linha por táxon.
+
+```{r}
+# Novamente, vamos ver como está originalmente:
+head(HMPTaxa$data$tax_data)
+
+# Então, aplicamos a atribuição de taxon para os UTOs:
+HMPTaxa$data$tax_abund <- calc_taxon_abund(HMPTaxa, "tax_data",
+                                       cols = hmp_samples$sample_id)
+
+# Deverá ficar da seguinte forma, uma linha por táxon:
+head(HMPTaxa$data$tax_abund)
+```
+
+Também podemos calcular o número de amostras que possuem reads para cada táxon, por meio da função `calc_n_samples()`.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+obj$data$tax_occ <- calc_n_samples(obj, "tax_abund", groups = hmp_samples$body_site)
+
+```
+
+Notem a adição de mais uma tabela contendo a contagem de reads para cada táxon por área do corpo
+
+```{r message=FALSE, paged.print=FALSE}
+print(obj)
+```
+
+## Plotando os dados taxonômicos
+
+Com as informações que obtemos por táxon, podemos plotar as informações usando árvores de calor.
+
+O código abaixo apresenta o número de amostras de "Nariz" que possuem reads para cada táxon. Ele também representa o número de OTUs atribuídas a cada táxon no conjunto de dados geral.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+heat_tree(obj, 
+          node_label = taxon_names,
+          node_size = n_obs,
+          node_color = Nose, 
+          node_size_axis_label = "OTU count",
+          node_color_axis_label = "Samples with reads")
+```
+
+## Comparando dois tratamentos/grupos
+
+Para comparar grupos de amostras, vamos utilizar a função `compare_groups()`. Neste caso vamos comparar, quais táxons diferem entre entre homens e mulheres.
+
+```{r message=FALSE, warning=FALSE}
+obj$data$diff_table <- compare_groups(obj, dataset = "tax_abund",
+                                      cols = hmp_samples$sample_id,
+                                      groups = hmp_samples$sex)
+print(obj$data$diff_table)
+```
+
+Neste caso, os táxons coloridos em bronze são mais abundantes nas mulheres e os de cor ciano são mais abundantes nos homens. Porém, não levamos em conta a significância estatística ao mostrar isso. Para verificar a significância estatística, precisamos corrigir as múltiplas comparações, por meio da função ```p.adjust()```.
+
+```{r}
+obj$data$diff_table$wilcox_p_value <- p.adjust(obj$data$diff_table$wilcox_p_value,
+                                               method = "fdr")
+```
+
+Para verificar a distribuição dos p-valores, podemos gerar um histograma utilizando a função ```hist``` com os resultados de teste de wilcox. A partir deste resultado, podemos ver que nenhuma das amostras apresentam diferença significativa para a comparação entre sexo.
+
+
+```{r}
+hist(obj$data$diff_table$wilcox_p_value) 
+```
+
+## Comparando qualquer número de tratamentos/grupos
+
+Também podemos fazer comparações com vários grupos. Inicialmente precisamos comparar os grupos a partir da função ```compare_groups()```, visto anteriormente para comparar a abundância de táxons entre homens e mulheres. Agora, vamos realizar a comparação de táxons entre regiões do corpo.
+
+```{r message=FALSE, warning=FALSE}
+obj$data$diff_table <- compare_groups(obj, dataset = "tax_abund",
+                                      cols = hmp_samples$sample_id,
+                                      groups = hmp_samples$body_site)
+#visualizar comparação
+print(obj$data$diff_table)
+```
+
+Para plotar os dados da comparação de abundância de táxons referentes à várias regiões do corpo, precisamos aplicar a função ```heat_tree_matrix()```, que irá apresentar os resultados de comparação ao pares.
+
+```{r message=FALSE, warning=FALSE}
+heat_tree_matrix(obj,
+                 dataset = "diff_table",
+                 node_size = n_obs,
+                 node_label = taxon_names,
+                 node_color = log2_median_ratio,
+                 node_color_range = diverging_palette(),
+                 node_color_trans = "linear",
+                 node_color_interval = c(-3, 3),
+                 edge_color_interval = c(-3, 3),
+                 node_size_axis_label = "Number of OTUs",
+                 node_color_axis_label = "Log2 ratio median proportions")
+```
